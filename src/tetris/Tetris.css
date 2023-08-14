@@ -1,0 +1,18 @@
+canvas{
+    height: 60vh ;
+}
+
+#controller button{
+    background-color: antiquewhite;
+    height: 10vh;
+    width: 30vw;
+    font-size: 40px;
+    border-radius: 2vh;
+    border: 2 solid rgb(140, 101, 83);
+    transition: background-color 0.3s;
+}
+
+#controller button:active{
+    background-color: rgb(129, 115, 98);
+}
+

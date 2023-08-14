@@ -1,8 +1,8 @@
 import { Console } from "console";
 import React, { useEffect, useRef } from "react";
+import './Tetris.css';
 
-
-//role based on  https://tetris.fandom.com/wiki/Tetris_Guideline
+//rules based on  https://tetris.fandom.com/wiki/Tetris_Guideline
 
 interface TetrisOptions {
     row: number;
@@ -57,7 +57,6 @@ class TetrisCanvasRender {
         const patternCtx = patternCanvas.getContext('2d') as CanvasRenderingContext2D;
         patternCanvas.width = tileSize;
         patternCanvas.height = tileSize;
-        //patternCtx.strokeStyle = strokeStyle;
         patternCtx.fillStyle = strokeStyle;
         patternCtx.fillRect(0, 0, tileSize, tileSize);
         patternCtx.fillStyle = fillStyle;
@@ -122,7 +121,7 @@ class TetrisCanvasRender {
 
 class TetrisManager {
     render: TetrisCanvasRender;
-    map: boolean[][];
+    map: boolean[][] = [[]];
     status: TetrisOptions;
     framequest: number | null = null;
     lastFrameTime: number = 0;
@@ -135,7 +134,6 @@ class TetrisManager {
     constructor(canvas: HTMLCanvasElement | null, options?: Partial<TetrisOptions>) {
         this.render = new TetrisCanvasRender(canvas, options);
         this.status = this.render.status;
-        this.map = this.init();
     }
     init() { // map[y][x] 
         let map = [];
@@ -149,14 +147,19 @@ class TetrisManager {
         return map;
     }
     start() {
+        this.close();
+        this.isDroping = false ;
+        this.isAnimation = false ;
+        this.isSticky = false ;
+        this.key = ''; 
         this.render.drawBackGround();
+        this.map = this.init();
         this.lastFrameTime = performance.now();
         this.framequest = requestAnimationFrame(this.update.bind(this));
     }
     update(currentFrameTime: number) {
         const delta = currentFrameTime - this.lastFrameTime;
         if (this.tetris === null ) {
-            console.log("new tetris");
             let tetris = this.getTetris();
             //try down 
             
@@ -257,7 +260,6 @@ class TetrisManager {
                 for(let x=0;x<this.status.colume;x++)line.push(false);
                 this.map.splice(y,1)
                 this.map.unshift(line);
-                console.log("rows =>",this.map.length);
                 //去除正在运动的方块，不然它会一起下移，那样就要操作tetris.y++
                 if(this.tetris)this.render.drawTetris(this.tetris,true);
                 this.render.clearLine(y);
@@ -271,6 +273,7 @@ class TetrisManager {
     }
     close() {
         if (this.framequest) cancelAnimationFrame(this.framequest);
+        this.tetris = null ;
     }
     spin(clockwise: boolean = true) {
         const tetris = this.tetris;
@@ -354,8 +357,6 @@ export function Tetris({ colume = 10, row = 20, tileSize = 25 }) {
         <>
             <h1>TETRIS</h1>
             <canvas width={colume * tileSize} height={row * tileSize}></canvas>
-            <div>LOG MESSAGE</div>
-            <div>{colume} * {row} </div>
             <div id="controller">
                 <button onClick={()=>{tetrisManagerRef.current.key = "SL"}}>左转</button>
                 <button onClick={()=>{tetrisManagerRef.current.key = "HD"}}>下下</button>
@@ -365,8 +366,9 @@ export function Tetris({ colume = 10, row = 20, tileSize = 25 }) {
                 <button onClick={()=>{tetrisManagerRef.current.key = "SD"}}>往下</button>
                 <button onClick={()=>{tetrisManagerRef.current.key = "R"}}>往右</button>
                 <br></br>
-                <button onClick={()=>{tetrisManagerRef.current.isAnimation = true}}>停止</button>
+                <button onClick={()=>{tetrisManagerRef.current.isAnimation = true}}>暂停</button>
                 <button onClick={()=>{tetrisManagerRef.current.isAnimation = false}}>开始</button>
+                <button onClick={()=>{tetrisManagerRef.current.start()}}>重来</button>
             </div>
         </>
     )
