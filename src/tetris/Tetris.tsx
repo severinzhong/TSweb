@@ -33,6 +33,12 @@ const tetrisCenter = [
     [2,1],[1,1],[1.5,1.5],[1.5,1.5],[1.5,1.5],[1.5,1.5],[1.5,1.5],
 ]
 
+function tryVibrate(time:number = 200){
+    if ('vibrate' in navigator) {
+        navigator.vibrate(time); 
+      }
+}
+
 class TetrisCanvasRender {
     canvas: HTMLCanvasElement | null;
     context: CanvasRenderingContext2D | null;
@@ -131,6 +137,9 @@ class TetrisManager {
     isAnimation: boolean = false;
     isSticky: boolean = false;
     key: string = ''; // L,R,SL,SR,SD,HD,
+    keyTime:number = 0 ;
+    keySpeed:number = 200;
+    isKeyDown:boolean = false ;
     constructor(canvas: HTMLCanvasElement | null, options?: Partial<TetrisOptions>) {
         this.render = new TetrisCanvasRender(canvas, options);
         this.status = this.render.status;
@@ -178,53 +187,11 @@ class TetrisManager {
             let tetris = this.getTetris();
             if (!this.isAnimation) {
                 // trying key
-                switch(this.key){
-                    case 'R':
-                        this.render.drawTetris(tetris, true);
-                        tetris.x ++ ;
-                        if (!this.check(tetris))tetris.x -- ;
-                        this.render.drawTetris(tetris);
-                        this.key = '' ;
-                        break ;
-                    case 'L':
-                        this.render.drawTetris(tetris, true);
-                        tetris.x -- ;
-                        if (!this.check(tetris))tetris.x ++ ;
-                        this.render.drawTetris(tetris);
-                        this.key = '' ;
-                        break ;
-                    case 'SD':
-                        this.render.drawTetris(tetris, true);
-                        tetris.y ++ ;
-                        if (!this.check(tetris))tetris.y -- ;
-                        this.render.drawTetris(tetris);
-                        this.key = '' ;
-                        break ;
-                    case 'HD' :
-                        this.render.drawTetris(tetris, true);
-                        while(this.check(tetris)){
-                            tetris.y ++ ;
-                        }
-                        tetris.y -- ;
-                        this.render.drawTetris(tetris);
-                        this.key = '' ;
-                        break ;
-                    case 'SR':
-                        this.render.drawTetris(tetris, true);
-                        this.spin(true);
-                        if (!this.check(tetris))this.spin(false) ;
-                        this.render.drawTetris(tetris);
-                        this.key = '' ;
-                        break ;
-                    case 'SL':
-                        this.render.drawTetris(tetris, true);
-                        this.spin(false);
-                        if (!this.check(tetris))this.spin(true) ;
-                        this.render.drawTetris(tetris);
-                        this.key = '' ;
-                        break ;
-                    default : 
-                        break ;
+                if(this.isKeyDown && currentFrameTime - this.keyTime >= this.keySpeed){
+                    let k = this.key ;
+                    this.applyKey(this.key);
+                    this.key  = k ;
+                    this.keyTime += this.keySpeed ;
                 }
 
                 //auto dropping
@@ -246,10 +213,72 @@ class TetrisManager {
                         this.tryClear() ;
                     }
                 }
+            }else{
+                this.lastFrameTime = currentFrameTime ;
             }
         }
 
         this.framequest = requestAnimationFrame(this.update.bind(this));
+    }
+    keyDown(key:string){
+        this.key = key ;
+        this.keyTime = performance.now();
+        this.isKeyDown = true ;
+    }
+    keyUp(){
+        this.applyKey(this.key);
+        this.isKeyDown = false ;
+    }
+    applyKey(key:string){
+        let tetris = this.getTetris();
+        switch(this.key){
+            case 'R':
+                this.render.drawTetris(tetris, true);
+                tetris.x ++ ;
+                if (!this.check(tetris))tetris.x -- ;
+                this.render.drawTetris(tetris);
+                this.key = '' ;
+                break ;
+            case 'L':
+                this.render.drawTetris(tetris, true);
+                tetris.x -- ;
+                if (!this.check(tetris))tetris.x ++ ;
+                this.render.drawTetris(tetris);
+                this.key = '' ;
+                break ;
+            case 'SD':
+                this.render.drawTetris(tetris, true);
+                tetris.y ++ ;
+                if (!this.check(tetris))tetris.y -- ;
+                this.render.drawTetris(tetris);
+                this.key = '' ;
+                break ;
+            case 'HD' :
+                this.render.drawTetris(tetris, true);
+                while(this.check(tetris)){
+                    tetris.y ++ ;
+                }
+                tetris.y -- ;
+                this.render.drawTetris(tetris);
+                this.key = '' ;
+                break ;
+            case 'SR':
+                this.render.drawTetris(tetris, true);
+                this.spin(true);
+                if (!this.check(tetris))this.spin(false) ;
+                this.render.drawTetris(tetris);
+                this.key = '' ;
+                break ;
+            case 'SL':
+                this.render.drawTetris(tetris, true);
+                this.spin(false);
+                if (!this.check(tetris))this.spin(true) ;
+                this.render.drawTetris(tetris);
+                this.key = '' ;
+                break ;
+            default : 
+                break ;
+        }
     }
     tryClear(){
         
@@ -358,17 +387,58 @@ export function Tetris({ colume = 10, row = 20, tileSize = 25 }) {
             <h1>TETRIS</h1>
             <canvas width={colume * tileSize} height={row * tileSize}></canvas>
             <div id="controller">
-                <button onClick={()=>{tetrisManagerRef.current.key = "SL"}}>左转</button>
-                <button onClick={()=>{tetrisManagerRef.current.key = "HD"}}>下下</button>
-                <button onClick={()=>{tetrisManagerRef.current.key = "SR"}}>右转</button>
+                <button 
+                onMouseDown={()=>{
+                    tetrisManagerRef.current.keyDown("SL");
+                    tryVibrate()}} 
+                onMouseUp={()=>{
+                    tetrisManagerRef.current.keyUp();
+                }}
+                >左转</button>
+                <button 
+                onMouseDown={()=>{
+                    tetrisManagerRef.current.keyDown("HD");
+                    tryVibrate()}} 
+                onMouseUp={()=>{
+                    tetrisManagerRef.current.keyUp();
+                }}
+                >下下</button>
+                <button 
+                onMouseDown={()=>{
+                    tetrisManagerRef.current.keyDown("SR");
+                    tryVibrate()}} 
+                onMouseUp={()=>{
+                    tetrisManagerRef.current.keyUp();
+                }}>右转</button>
                 <br></br>
-                <button onClick={()=>{tetrisManagerRef.current.key = "L"}}>往左</button>
-                <button onClick={()=>{tetrisManagerRef.current.key = "SD"}}>往下</button>
-                <button onClick={()=>{tetrisManagerRef.current.key = "R"}}>往右</button>
+                <button 
+                onMouseDown={()=>{
+                    tetrisManagerRef.current.keyDown("L");
+                    tryVibrate()}} 
+                onMouseUp={()=>{
+                    tetrisManagerRef.current.keyUp();
+                }}>往左</button>
+                <button 
+                onMouseDown={()=>{
+                    tetrisManagerRef.current.keyDown("SD");
+                    tryVibrate()}} 
+                onMouseUp={()=>{
+                    tetrisManagerRef.current.keyUp();
+                }}>往下</button>
+                <button
+                onMouseDown={()=>{
+                    tetrisManagerRef.current.keyDown("R");
+                    tryVibrate()}} 
+                onMouseUp={()=>{
+                    tetrisManagerRef.current.keyUp();
+                }}>往右</button>
                 <br></br>
-                <button onClick={()=>{tetrisManagerRef.current.isAnimation = true}}>暂停</button>
-                <button onClick={()=>{tetrisManagerRef.current.isAnimation = false}}>开始</button>
-                <button onClick={()=>{tetrisManagerRef.current.start()}}>重来</button>
+                <button onClick={()=>{tetrisManagerRef.current.isAnimation = true;tryVibrate();}}>暂停</button>
+                <button onClick={()=>{tetrisManagerRef.current.isAnimation = false;tryVibrate();}}>开始</button>
+                <button onClick={()=>{tetrisManagerRef.current.start();tryVibrate();}}>重来</button>
+            </div>
+            <div id="controller">
+
             </div>
         </>
     )
