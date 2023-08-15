@@ -1,8 +1,19 @@
-import { Console } from "console";
 import React, { useEffect, useRef } from "react";
 import './Tetris.css';
 
 //rules based on  https://tetris.fandom.com/wiki/Tetris_Guideline
+
+
+function deepCopy<T>(obj: T) {
+    return JSON.parse(JSON.stringify(obj));
+}
+
+function isMobileDevice() {
+    return /Mobile|Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+const isMobile = isMobileDevice();
+
+console.log(isMobile ? "这是手机" : "这是PC");
 
 interface TetrisOptions {
     row: number;
@@ -30,13 +41,13 @@ const tetrisShape = [ // totoal 7 shape
 ]
 
 const tetrisCenter = [
-    [2,1],[1,1],[1.5,1.5],[1.5,1.5],[1.5,1.5],[1.5,1.5],[1.5,1.5],
+    [2, 1], [1, 1], [1.5, 1.5], [1.5, 1.5], [1.5, 1.5], [1.5, 1.5], [1.5, 1.5],
 ]
 
-function tryVibrate(time:number = 200){
+function tryVibrate(time: number = 200) {
     if ('vibrate' in navigator) {
-        navigator.vibrate(time); 
-      }
+        navigator.vibrate(time);
+    }
 }
 
 class TetrisCanvasRender {
@@ -91,7 +102,7 @@ class TetrisCanvasRender {
     drawTetris(tetris: TetrisInterface, clear: boolean = false) {
         if (this.context === null) return;
         const ctx = this.context;
-        const shapeColor = clear ? ['black', 'white'] : ['white',tetrisColor[tetris.shapeType]]
+        const shapeColor = clear ? ['black', 'white'] : ['black', tetrisColor[tetris.shapeType]]
         const pattern = ctx.createPattern(this.getPattern(...shapeColor), 'repeat') as CanvasPattern;
         ctx.fillStyle = pattern;
         let { x, y, shapeType, shape } = tetris;
@@ -106,24 +117,95 @@ class TetrisCanvasRender {
                 ctx.fillRect((x + shape[i][0]) * tileSize, (y + shape[i][1]) * tileSize, tileSize, tileSize);
         }
     }
-    clearLine(idx:number){
+    clearLine(idx: number) {
         if (this.context === null || this.canvas === null) return;
         const ctx = this.context;
         const { row, colume, tileSize } = this.status;
         ctx.drawImage(this.canvas,
-            0, 
-            0, 
-            colume * tileSize, 
+            0,
+            0,
+            colume * tileSize,
             idx * tileSize,
-            0, 
+            0,
             tileSize,
-            colume*tileSize,
-            idx*tileSize);
+            colume * tileSize,
+            idx * tileSize);
         const pattern = ctx.createPattern(this.getPattern('black', 'white'), 'repeat') as CanvasPattern;
-        ctx.fillStyle = pattern ;
-        ctx.fillRect(0,0,tileSize*colume,tileSize);
+        ctx.fillStyle = pattern;
+        ctx.fillRect(0, 0, tileSize * colume, tileSize);
+    }
+    playClearLine(targetY: number, delay: number = 200) {
+        return new Promise<void>((resolve) => {
+            if (this.context === null || this.canvas === null) return;
+            const ctx = this.context;
+            const canvas = this.canvas;
+            const { row, colume, tileSize } = this.status;
+            let lastFrameTime = 0;
+            const pattern = ctx.createPattern(this.getPattern('black', 'white'), 'repeat') as CanvasPattern;
+            ctx.fillStyle = pattern;
+            let id = 0;
+            function playclear(currentFrameTime: number) {
+                if (lastFrameTime === 0) lastFrameTime = currentFrameTime;
+                const delta = currentFrameTime - lastFrameTime;
+                const offset = Math.floor(Math.max(delay - delta, 0) / delay * colume / 2); // 80%就是10块消除8快
+                ctx.fillRect(offset * tileSize, targetY * tileSize, tileSize * (colume - 2 * offset), tileSize);
+
+                if (delta >= delay) {
+                    ctx.drawImage(canvas,
+                        0,
+                        0,
+                        colume * tileSize,
+                        targetY * tileSize,
+                        0,
+                        tileSize,
+                        colume * tileSize,
+                        targetY * tileSize);
+                    ctx.fillRect(0, 0, tileSize * colume, tileSize);
+                    resolve()
+                    cancelAnimationFrame(id);
+                } else {
+                    id = requestAnimationFrame(playclear);
+                }
+            }
+            id = requestAnimationFrame(playclear);
+        })
+    }
+    playQuickDown(tetris: TetrisInterface, targetY: number, delay: number = 200) {
+        return new Promise<void>((resolve) => {
+            let lastFrameTime = 0;
+            const drawTetris = this.drawTetris.bind(this);
+            const originY = tetris.y;
+            let id = 0;
+            function quickdown(currentFrameTime: number) {
+                if (lastFrameTime === 0) lastFrameTime = currentFrameTime;
+                const delta = currentFrameTime - lastFrameTime;
+                const Y = Math.floor(Math.min(delta, delay) / delay * (targetY - originY) + originY);
+                drawTetris(tetris, true);
+                tetris.y = Y;
+                drawTetris(tetris);
+                if (delta >= delay) {
+                    cancelAnimationFrame(id);
+                    resolve();
+                } else {
+                    requestAnimationFrame(quickdown);
+                }
+            }
+            id = requestAnimationFrame(quickdown);
+        })
     }
 }
+
+const buttonMap = [
+    ["SL", "左转"],
+    ["HD", "快下"],
+    ["SR", "右转"],
+    ["L", "左"],
+    ["SD", "下"],
+    ["R", "右"],
+    ["Pause", "暂停"],
+    ["Continue", "继续"],
+    ["Start", "重开"],
+]
 
 class TetrisManager {
     render: TetrisCanvasRender;
@@ -134,12 +216,16 @@ class TetrisManager {
     tetris: TetrisInterface | null = null;
     speed: number = 500; //ms 
     isDroping: boolean = false;
-    isAnimation: boolean = false;
-    isSticky: boolean = false;
+    isAnimation: string = '';
+    isSticky: number = 0;
+    stickTime: number = 300;
     key: string = ''; // L,R,SL,SR,SD,HD,
-    keyTime:number = 0 ;
-    keySpeed:number = 200;
-    isKeyDown:boolean = false ;
+    keyTime: number = 0;
+    keySpeed: number = 120;
+    isKeyDown: boolean = false;
+    score: number = 0;
+    allowKickWall: boolean = true;
+    allowKickFloor: boolean = true;
     constructor(canvas: HTMLCanvasElement | null, options?: Partial<TetrisOptions>) {
         this.render = new TetrisCanvasRender(canvas, options);
         this.status = this.render.status;
@@ -157,10 +243,10 @@ class TetrisManager {
     }
     start() {
         this.close();
-        this.isDroping = false ;
-        this.isAnimation = false ;
-        this.isSticky = false ;
-        this.key = ''; 
+        this.isDroping = false;
+        this.isAnimation = '';
+        this.isSticky = 0;
+        this.key = '';
         this.render.drawBackGround();
         this.map = this.init();
         this.lastFrameTime = performance.now();
@@ -168,30 +254,32 @@ class TetrisManager {
     }
     update(currentFrameTime: number) {
         const delta = currentFrameTime - this.lastFrameTime;
-        if (this.tetris === null ) {
-            let tetris = this.getTetris();
-            //try down 
-            
-            tetris.y += 1 ;
-            if (this.check(tetris)) {
-                this.isDroping = true;
-                this.render.drawTetris(tetris);
-            }
-            else { // game over
-                tetris.y -= 1 ;
-                this.render.drawTetris(tetris);
-                this.stop();
-            }
-        }
-        else {
-            let tetris = this.getTetris();
-            if (!this.isAnimation) {
+        if (this.isAnimation === '') {
+            // greate new 
+            if (this.tetris === null) {
+                let tetris = this.getTetris();
+                this.key = '';
+                //try down 
+
+                tetris.y += 1;
+                if (this.check(tetris)) {
+                    this.isDroping = true;
+                    this.render.drawTetris(tetris);
+                }
+                else { // game over
+                    tetris.y -= 1;
+                    this.render.drawTetris(tetris);
+                    this.stop();
+                }
+            } else {
+
+                let tetris = this.getTetris();
                 // trying key
-                if(this.isKeyDown && currentFrameTime - this.keyTime >= this.keySpeed){
-                    let k = this.key ;
-                    this.applyKey(this.key);
-                    this.key  = k ;
-                    this.keyTime += this.keySpeed ;
+                if (this.isKeyDown && currentFrameTime - this.keyTime >= this.keySpeed) {
+                    let k = this.key;
+                    this.applyKey();
+                    this.key = k;
+                    this.keyTime += this.keySpeed;
                 }
 
                 //auto dropping
@@ -203,106 +291,167 @@ class TetrisManager {
                         tetris.y += 1;
                         this.render.drawTetris(tetris);
                         this.lastFrameTime = currentFrameTime;
-                    } else { 
-                        tetris.y -= 1;
-                        this.isSticky = true ;
-                        for (let i = 0; i < tetris.shape.length; i++)
-                            this.map[tetris.y + tetris.shape[i][1]][tetris.x + tetris.shape[i][0]] = true;
-                        this.tetris = null; //touch the bottom
-
-                        this.tryClear() ;
+                    } else {//已经到底
+                        tetris.y -= 1; // 还原
+                        if (this.isSticky === 0) this.isSticky = currentFrameTime;
+                        if (currentFrameTime - this.isSticky >= this.stickTime) {
+                            for (let i = 0; i < tetris.shape.length; i++)
+                                this.map[tetris.y + tetris.shape[i][1]][tetris.x + tetris.shape[i][0]] = true;
+                            this.tetris = null; //touch the bottom
+                            this.isSticky = 0;
+                            this.tryClear();
+                        }
                     }
                 }
-            }else{
-                this.lastFrameTime = currentFrameTime ;
             }
+        } else {
+            // animation stage
+            this.lastFrameTime = currentFrameTime;
+
         }
 
         this.framequest = requestAnimationFrame(this.update.bind(this));
     }
-    keyDown(key:string){
-        this.key = key ;
+    keyDown(key: string) {
+        this.key = key;
         this.keyTime = performance.now();
-        this.isKeyDown = true ;
+        this.isKeyDown = true;
+        tryVibrate()
     }
-    keyUp(){
-        this.applyKey(this.key);
-        this.isKeyDown = false ;
+    keyUp() {
+        this.applyKey();
+        this.isKeyDown = false;
     }
-    applyKey(key:string){
+    applyKey() {
+        if (this.isAnimation && this.key in ['R', 'L', 'SR', 'SL', 'HD', 'SD']) this.key = '';
         let tetris = this.getTetris();
-        switch(this.key){
+        let dup = deepCopy(tetris);
+        let needContinue = true;
+        switch (this.key) {
             case 'R':
                 this.render.drawTetris(tetris, true);
-                tetris.x ++ ;
-                if (!this.check(tetris))tetris.x -- ;
+                tetris.x++;
+                if (!this.check(tetris)) tetris.x--;
                 this.render.drawTetris(tetris);
-                this.key = '' ;
-                break ;
+                this.key = '';
+                break;
             case 'L':
                 this.render.drawTetris(tetris, true);
-                tetris.x -- ;
-                if (!this.check(tetris))tetris.x ++ ;
+                tetris.x--;
+                if (!this.check(tetris)) tetris.x++;
                 this.render.drawTetris(tetris);
-                this.key = '' ;
-                break ;
+                this.key = '';
+                break;
             case 'SD':
                 this.render.drawTetris(tetris, true);
-                tetris.y ++ ;
-                if (!this.check(tetris))tetris.y -- ;
+                tetris.y++;
+                if (!this.check(tetris)) tetris.y--;
                 this.render.drawTetris(tetris);
-                this.key = '' ;
-                break ;
-            case 'HD' :
-                this.render.drawTetris(tetris, true);
-                while(this.check(tetris)){
-                    tetris.y ++ ;
+                this.key = '';
+                break;
+            case 'HD':
+                let originY = tetris.y;
+                while (this.check(tetris)) {
+                    tetris.y++;
                 }
-                tetris.y -- ;
-                this.render.drawTetris(tetris);
-                this.key = '' ;
-                break ;
+                let targetY = --tetris.y;
+                tetris.y = originY;
+                if (targetY > originY) {
+                    this.isAnimation = 'HD';
+                    this.key = '';
+                    this.render.playQuickDown(tetris, targetY, (targetY - originY) * 10).then(
+                        () => {
+                            this.isAnimation = '';
+                        }
+                    )
+                }
+                break;
             case 'SR':
-                this.render.drawTetris(tetris, true);
                 this.spin(true);
-                if (!this.check(tetris))this.spin(false) ;
+                if (!this.check(tetris)) {
+                    needContinue = true;
+                    if (this.allowKickWall) {
+                        tetris.x++;
+                        if (needContinue && this.check(tetris)) needContinue = false;
+                        if (needContinue) tetris.x -= 2;
+                        if (needContinue && this.check(tetris)) needContinue = false;
+                        if (needContinue) tetris.x++;
+                    }
+
+                    if (this.allowKickFloor) {
+                        if (needContinue) tetris.y--;
+                        if (needContinue && this.check(tetris)) needContinue = false;
+                        if (needContinue) tetris.y++;
+                    }
+                    if (needContinue) this.spin(false);
+                }
+                this.render.drawTetris(dup, true);
                 this.render.drawTetris(tetris);
-                this.key = '' ;
-                break ;
+                this.key = '';
+                break;
             case 'SL':
-                this.render.drawTetris(tetris, true);
+
                 this.spin(false);
-                if (!this.check(tetris))this.spin(true) ;
+                if (!this.check(tetris)) {
+                    needContinue = true;
+                    if (this.allowKickWall) {
+                        tetris.x++;
+                        if (needContinue && this.check(tetris)) needContinue = false;
+                        if (needContinue) tetris.x -= 2;
+                        if (needContinue && this.check(tetris)) needContinue = false;
+                        if (needContinue) tetris.x++;
+                    }
+
+                    if (this.allowKickFloor) {
+                        if (needContinue) tetris.y--;
+                        if (needContinue && this.check(tetris)) needContinue = false;
+                        if (needContinue) tetris.y++;
+                    }
+                    if (needContinue) this.spin(true);
+                }
+                this.render.drawTetris(dup, true);
                 this.render.drawTetris(tetris);
-                this.key = '' ;
-                break ;
-            default : 
-                break ;
+                this.key = '';
+                break;
+            case 'Pause':
+                this.key = '';
+                this.isAnimation = 'Pause';
+                break;
+            case 'Continue':
+                this.key = '';
+                this.isAnimation = '';
+                break;
+            case 'Start':
+                this.start();
+                break;
+            default:
+                break;
         }
     }
-    tryClear(){
-        
-        for(let y = 0 ; y < this.status.row;y++){
-            if (this.map[y].reduce((s,a) =>s && a , true) === true){
+    async tryClear() {
+        for (let y = 0; y < this.status.row; y++) {
+            if (this.map[y].reduce((s, a) => s && a, true) === true) {
                 //need clear
                 const line = []
-                for(let x=0;x<this.status.colume;x++)line.push(false);
-                this.map.splice(y,1)
+                for (let x = 0; x < this.status.colume; x++)line.push(false);
+                this.map.splice(y, 1)
                 this.map.unshift(line);
                 //去除正在运动的方块，不然它会一起下移，那样就要操作tetris.y++
-                if(this.tetris)this.render.drawTetris(this.tetris,true);
-                this.render.clearLine(y);
-                if(this.tetris)this.render.drawTetris(this.tetris);
+                if (this.tetris) this.render.drawTetris(this.tetris, true);
+                this.isAnimation = 'clearLine'
+                await this.render.playClearLine(y)
+                if (this.tetris) this.render.drawTetris(this.tetris);
             }
         }
+        if (this.isAnimation === 'clearLine') this.isAnimation = '';
     }
     stop() {
         console.log("GameOver");
-        this.isAnimation = true;
+        this.isAnimation = 'GameOver';
     }
     close() {
         if (this.framequest) cancelAnimationFrame(this.framequest);
-        this.tetris = null ;
+        this.tetris = null;
     }
     spin(clockwise: boolean = true) {
         const tetris = this.tetris;
@@ -314,19 +463,19 @@ class TetrisManager {
             let cy = tetrisCenter[tetris.shapeType][1];
             if (clockwise) {
                 //left -y,x
-                [x,y] = [x,y+1];
-                [x,y] = [x-cx,y-cy];
-                [x,y] = [-y,x] ;
-                [x,y] = [x+cx,y+cy];
-                tetris.shape[i] = [x,y];
+                [x, y] = [x, y + 1];
+                [x, y] = [x - cx, y - cy];
+                [x, y] = [-y, x];
+                [x, y] = [x + cx, y + cy];
+                tetris.shape[i] = [x, y];
             }
             else {
                 //right y,-x
-                [x,y] = [x+1,y];
-                [x,y] = [x-cx,y-cy];
-                [x,y] = [y,-x] ;
-                [x,y] = [x+cx,y+cy];
-                tetris.shape[i] = [x,y];
+                [x, y] = [x + 1, y];
+                [x, y] = [x - cx, y - cy];
+                [x, y] = [y, -x];
+                [x, y] = [x + cx, y + cy];
+                tetris.shape[i] = [x, y];
             }
         }
         return;
@@ -334,12 +483,12 @@ class TetrisManager {
 
     getTetris(): TetrisInterface {
         if (this.tetris) return this.tetris;
-        
+
         let shapeType = Math.floor(Math.random() * tetrisShape.length);
         let x = Math.floor(Math.random() * (this.status.colume - 3));
-        let y = 0 ;
-        
-        let shape = tetrisShape[shapeType];
+        let y = 0;
+
+        let shape = [...tetrisShape[shapeType]]; //need copy 
         this.tetris = { x, y, shapeType, shape }
         return this.tetris;
     }
@@ -358,10 +507,12 @@ class TetrisManager {
                 x + shape[i][0] < 0 ||
                 x + shape[i][0] >= colume ||
                 y + shape[i][1] < 0 ||
-                y + shape[i][1] >= row ||
-                this.map[y + shape[i][1]][x + shape[i][0]] 
-            )
-                return false;
+                y + shape[i][1] >= row
+            ) { return false; }
+            else {
+                if (this.map[y + shape[i][1]][x + shape[i][0]] === true)
+                    return false;
+            }
         return true;
     }
 }
@@ -387,55 +538,23 @@ export function Tetris({ colume = 10, row = 20, tileSize = 25 }) {
             <h1>TETRIS</h1>
             <canvas width={colume * tileSize} height={row * tileSize}></canvas>
             <div id="controller">
-                <button 
-                onMouseDown={()=>{
-                    tetrisManagerRef.current.keyDown("SL");
-                    tryVibrate()}} 
-                onMouseUp={()=>{
-                    tetrisManagerRef.current.keyUp();
-                }}
-                >左转</button>
-                <button 
-                onMouseDown={()=>{
-                    tetrisManagerRef.current.keyDown("HD");
-                    tryVibrate()}} 
-                onMouseUp={()=>{
-                    tetrisManagerRef.current.keyUp();
-                }}
-                >下下</button>
-                <button 
-                onMouseDown={()=>{
-                    tetrisManagerRef.current.keyDown("SR");
-                    tryVibrate()}} 
-                onMouseUp={()=>{
-                    tetrisManagerRef.current.keyUp();
-                }}>右转</button>
-                <br></br>
-                <button 
-                onMouseDown={()=>{
-                    tetrisManagerRef.current.keyDown("L");
-                    tryVibrate()}} 
-                onMouseUp={()=>{
-                    tetrisManagerRef.current.keyUp();
-                }}>往左</button>
-                <button 
-                onMouseDown={()=>{
-                    tetrisManagerRef.current.keyDown("SD");
-                    tryVibrate()}} 
-                onMouseUp={()=>{
-                    tetrisManagerRef.current.keyUp();
-                }}>往下</button>
-                <button
-                onMouseDown={()=>{
-                    tetrisManagerRef.current.keyDown("R");
-                    tryVibrate()}} 
-                onMouseUp={()=>{
-                    tetrisManagerRef.current.keyUp();
-                }}>往右</button>
-                <br></br>
-                <button onClick={()=>{tetrisManagerRef.current.isAnimation = true;tryVibrate();}}>暂停</button>
-                <button onClick={()=>{tetrisManagerRef.current.isAnimation = false;tryVibrate();}}>开始</button>
-                <button onClick={()=>{tetrisManagerRef.current.start();tryVibrate();}}>重来</button>
+                {
+                    buttonMap.map((item, idx) => (
+                        <>
+                            {isMobile &&
+                                <button key={idx}
+                                    onTouchStart={() => tetrisManagerRef.current.keyDown(item[0])}
+                                    onTouchEnd={() => tetrisManagerRef.current.keyUp()}>{item[1]}</button>}
+                            {!isMobile &&
+                                <button key={idx}
+                                    onMouseDown={() => tetrisManagerRef.current.keyDown(item[0])}
+                                    onMouseUp={() => tetrisManagerRef.current.keyUp()}>{item[1]}</button>
+                            }
+                            {(idx + 1) % 3 === 0 && <br />}
+                        </>
+                    ))
+
+                }
             </div>
             <div id="controller">
 
