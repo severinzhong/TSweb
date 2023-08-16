@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import './Tetris.css';
 
 //rules based on  https://tetris.fandom.com/wiki/Tetris_Guideline
@@ -54,6 +54,7 @@ class TetrisCanvasRender {
     canvas: HTMLCanvasElement | null;
     context: CanvasRenderingContext2D | null;
     status: TetrisOptions;
+    plette: CanvasPattern[] ;
     constructor(canvas: HTMLCanvasElement | null, options?: Partial<TetrisOptions>) {
         console.log("TetrisCanvasRender init");
         this.canvas = canvas;
@@ -63,6 +64,11 @@ class TetrisCanvasRender {
             colume: options?.colume || 10,
             tileSize: options?.tileSize || 10,
         }
+        this.plette = [] ;
+        for(let i=0;i<tetrisColor.length;i++){
+            this.plette.push(this.context?.createPattern(this.getPattern('black', tetrisColor[i]), 'repeat') as CanvasPattern) ;
+        }
+        this.plette.push(this.context?.createPattern(this.getPattern('black', 'white'), 'repeat') as CanvasPattern) ;
 
     }
     getPattern(
@@ -85,10 +91,7 @@ class TetrisCanvasRender {
         if (this.context === null) return false;
         let ctx = this.context;
         let { row, colume, tileSize } = this.status;
-
-
-        const pattern = ctx.createPattern(this.getPattern(), 'repeat') as CanvasPattern;
-
+        const pattern = this.plette[7] ;
         ctx.fillStyle = pattern;
         ctx.fillRect(0, 0, colume * tileSize, row * tileSize);
     }
@@ -102,10 +105,10 @@ class TetrisCanvasRender {
     drawTetris(tetris: TetrisInterface, clear: boolean = false) {
         if (this.context === null) return;
         const ctx = this.context;
-        const shapeColor = clear ? ['black', 'white'] : ['black', tetrisColor[tetris.shapeType]]
-        const pattern = ctx.createPattern(this.getPattern(...shapeColor), 'repeat') as CanvasPattern;
+        const shapeColor = clear ? 7 : tetris.shapeType
+        const pattern = this.plette[shapeColor];
         ctx.fillStyle = pattern;
-        let { x, y, shapeType, shape } = tetris;
+        let { x, y, shape } = tetris;
         const { row, colume, tileSize } = this.status;
         for (let i = 0; i < shape.length; i++) {
             if (
@@ -120,7 +123,7 @@ class TetrisCanvasRender {
     clearLine(idx: number) {
         if (this.context === null || this.canvas === null) return;
         const ctx = this.context;
-        const { row, colume, tileSize } = this.status;
+        const { colume, tileSize } = this.status;
         ctx.drawImage(this.canvas,
             0,
             0,
@@ -130,7 +133,7 @@ class TetrisCanvasRender {
             tileSize,
             colume * tileSize,
             idx * tileSize);
-        const pattern = ctx.createPattern(this.getPattern('black', 'white'), 'repeat') as CanvasPattern;
+        const pattern = this.plette[7];
         ctx.fillStyle = pattern;
         ctx.fillRect(0, 0, tileSize * colume, tileSize);
     }
@@ -139,15 +142,15 @@ class TetrisCanvasRender {
             if (this.context === null || this.canvas === null) return;
             const ctx = this.context;
             const canvas = this.canvas;
-            const { row, colume, tileSize } = this.status;
+            const { colume, tileSize } = this.status;
             let lastFrameTime = 0;
-            const pattern = ctx.createPattern(this.getPattern('black', 'white'), 'repeat') as CanvasPattern;
-            ctx.fillStyle = pattern;
+            const pattern = this.plette[7];
             let id = 0;
             function playclear(currentFrameTime: number) {
                 if (lastFrameTime === 0) lastFrameTime = currentFrameTime;
                 const delta = currentFrameTime - lastFrameTime;
                 const offset = Math.floor(Math.max(delay - delta, 0) / delay * colume / 2); // 80%就是10块消除8快
+                ctx.fillStyle = pattern;
                 ctx.fillRect(offset * tileSize, targetY * tileSize, tileSize * (colume - 2 * offset), tileSize);
 
                 if (delta >= delay) {
@@ -160,6 +163,7 @@ class TetrisCanvasRender {
                         tileSize,
                         colume * tileSize,
                         targetY * tileSize);
+                    ctx.fillStyle = pattern;
                     ctx.fillRect(0, 0, tileSize * colume, tileSize);
                     resolve()
                     cancelAnimationFrame(id);
@@ -203,8 +207,9 @@ const buttonMap = [
     ["SD", "下"],
     ["R", "右"],
     ["Pause", "暂停"],
-    ["Continue", "继续"],
     ["Start", "重开"],
+    ["Continue", "继续"],
+    
 ]
 
 class TetrisManager {
@@ -226,6 +231,7 @@ class TetrisManager {
     score: number = 0;
     allowKickWall: boolean = true;
     allowKickFloor: boolean = true;
+    setScore: Function = () => { };
     constructor(canvas: HTMLCanvasElement | null, options?: Partial<TetrisOptions>) {
         this.render = new TetrisCanvasRender(canvas, options);
         this.status = this.render.status;
@@ -249,6 +255,8 @@ class TetrisManager {
         this.key = '';
         this.render.drawBackGround();
         this.map = this.init();
+        this.score = 0;
+        this.setScore('start');
         this.lastFrameTime = performance.now();
         this.framequest = requestAnimationFrame(this.update.bind(this));
     }
@@ -257,25 +265,25 @@ class TetrisManager {
         if (this.isAnimation === '') {
             // greate new 
             if (this.tetris === null) {
+                this.isAnimation = "create" ;
                 let tetris = this.getTetris();
                 this.key = '';
                 //try down 
-
-                tetris.y += 1;
-                if (this.check(tetris)) {
+                if (!this.check(tetris)) {
+                    console.log("gameOver")
+                    this.render.drawTetris(tetris);
+                    this.isAnimation = "GameOver";
+                    this.stop();
+                } else{
                     this.isDroping = true;
                     this.render.drawTetris(tetris);
+                    this.isAnimation = '' ;
                 }
-                else { // game over
-                    tetris.y -= 1;
-                    this.render.drawTetris(tetris);
-                    this.stop();
-                }
+                
             } else {
-
                 let tetris = this.getTetris();
                 // trying key
-                if (this.isKeyDown && currentFrameTime - this.keyTime >= this.keySpeed) {
+                if (this.isKeyDown && currentFrameTime - this.keyTime >= this.keySpeed ) {
                     let k = this.key;
                     this.applyKey();
                     this.key = k;
@@ -283,7 +291,7 @@ class TetrisManager {
                 }
 
                 //auto dropping
-                if (this.isDroping && delta >= this.speed) {
+                if (this.isDroping && delta >= (this.speed - 300 + 300 * 100 / (this.score +100) )) { // min speed- 300 max speed
                     tetris.y += 1;
                     if (this.check(tetris)) {
                         tetris.y -= 1;
@@ -301,6 +309,7 @@ class TetrisManager {
                             this.isSticky = 0;
                             this.tryClear();
                         }
+                        this.lastFrameTime = currentFrameTime;
                     }
                 }
             }
@@ -323,29 +332,29 @@ class TetrisManager {
         this.isKeyDown = false;
     }
     applyKey() {
-        if (this.isAnimation && this.key in ['R', 'L', 'SR', 'SL', 'HD', 'SD']) this.key = '';
+        if (this.isAnimation && this.key in ['R', 'L', 'SR', 'SL', 'HD', 'SD']) { this.key = ''; return; }
         let tetris = this.getTetris();
         let dup = deepCopy(tetris);
         let needContinue = true;
         switch (this.key) {
             case 'R':
-                this.render.drawTetris(tetris, true);
                 tetris.x++;
                 if (!this.check(tetris)) tetris.x--;
+                this.render.drawTetris(dup, true);
                 this.render.drawTetris(tetris);
                 this.key = '';
                 break;
             case 'L':
-                this.render.drawTetris(tetris, true);
                 tetris.x--;
                 if (!this.check(tetris)) tetris.x++;
+                this.render.drawTetris(dup, true);
                 this.render.drawTetris(tetris);
                 this.key = '';
                 break;
             case 'SD':
-                this.render.drawTetris(tetris, true);
                 tetris.y++;
                 if (!this.check(tetris)) tetris.y--;
+                this.render.drawTetris(dup, true);
                 this.render.drawTetris(tetris);
                 this.key = '';
                 break;
@@ -358,13 +367,14 @@ class TetrisManager {
                 tetris.y = originY;
                 if (targetY > originY) {
                     this.isAnimation = 'HD';
-                    this.key = '';
                     this.render.playQuickDown(tetris, targetY, (targetY - originY) * 10).then(
                         () => {
                             this.isAnimation = '';
+                            this.key = '';
                         }
                     )
                 }
+                this.key = '';
                 break;
             case 'SR':
                 this.spin(true);
@@ -390,7 +400,6 @@ class TetrisManager {
                 this.key = '';
                 break;
             case 'SL':
-
                 this.spin(false);
                 if (!this.check(tetris)) {
                     needContinue = true;
@@ -429,8 +438,10 @@ class TetrisManager {
         }
     }
     async tryClear() {
+        let count = 0;
         for (let y = 0; y < this.status.row; y++) {
             if (this.map[y].reduce((s, a) => s && a, true) === true) {
+                count++;
                 //need clear
                 const line = []
                 for (let x = 0; x < this.status.colume; x++)line.push(false);
@@ -444,10 +455,31 @@ class TetrisManager {
             }
         }
         if (this.isAnimation === 'clearLine') this.isAnimation = '';
+
+        switch (count) {
+            case 0:
+                break;
+            case 1:
+                this.score += 1;
+                break;
+            case 2:
+                this.score += 3;
+                break;
+            case 3:
+                this.score += 6;
+                break;
+            case 4:
+                this.score += 10;
+                break;
+            default:
+                break;
+        }
+        this.setScore(this.score);
     }
     stop() {
         console.log("GameOver");
         this.isAnimation = 'GameOver';
+        this.setScore(this.score + ' GameOver');
     }
     close() {
         if (this.framequest) cancelAnimationFrame(this.framequest);
@@ -463,7 +495,7 @@ class TetrisManager {
             let cy = tetrisCenter[tetris.shapeType][1];
             if (clockwise) {
                 //left -y,x
-                [x, y] = [x, y + 1];
+                y = y + 1;
                 [x, y] = [x - cx, y - cy];
                 [x, y] = [-y, x];
                 [x, y] = [x + cx, y + cy];
@@ -471,7 +503,7 @@ class TetrisManager {
             }
             else {
                 //right y,-x
-                [x, y] = [x + 1, y];
+                x = x + 1;
                 [x, y] = [x - cx, y - cy];
                 [x, y] = [y, -x];
                 [x, y] = [x + cx, y + cy];
@@ -485,10 +517,10 @@ class TetrisManager {
         if (this.tetris) return this.tetris;
 
         let shapeType = Math.floor(Math.random() * tetrisShape.length);
-        let x = Math.floor(Math.random() * (this.status.colume - 3));
+        let x = Math.floor(Math.random() * (this.status.colume - 6)) + 2;
         let y = 0;
 
-        let shape = [...tetrisShape[shapeType]]; //need copy 
+        let shape = deepCopy(tetrisShape[shapeType]); //need copy 
         this.tetris = { x, y, shapeType, shape }
         return this.tetris;
     }
@@ -500,7 +532,7 @@ class TetrisManager {
      * @returns legal true | illegal false 
      */
     check(tetris: TetrisInterface) {
-        let { x, y, shapeType, shape } = tetris;
+        let { x, y, shape } = tetris;
         const { row, colume } = this.status;
         for (let i = 0; i < shape.length; i++)
             if (
@@ -519,7 +551,7 @@ class TetrisManager {
 
 
 export function Tetris({ colume = 10, row = 20, tileSize = 25 }) {
-
+    const [score, setScore] = useState('start');
     const tetrisManagerRef = useRef(new TetrisManager(null));
     useEffect(() => {
         tetrisManagerRef.current = new TetrisManager(
@@ -527,15 +559,16 @@ export function Tetris({ colume = 10, row = 20, tileSize = 25 }) {
             { row: row, colume: colume, tileSize: tileSize },
         )
         let tetrisManager = tetrisManagerRef.current;
+        tetrisManager.setScore = setScore;
         tetrisManager.start();
         return () => {
             tetrisManagerRef.current.close();
         }
-    }, [])
+    }, [colume, row, tileSize])
 
     return (
         <>
-            <h1>TETRIS</h1>
+            <h1>TETRIS {score}</h1>
             <canvas width={colume * tileSize} height={row * tileSize}></canvas>
             <div id="controller">
                 {
